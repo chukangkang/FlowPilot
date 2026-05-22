@@ -6,6 +6,7 @@ const SUB2API_PANEL_LISTENER_SENTINEL = 'data-multipage-sub2api-panel-listener';
 const SUB2API_DEFAULT_GROUP_NAME = 'codex';
 const SUB2API_DEFAULT_PROXY_NAME = '';
 const SUB2API_DEFAULT_REDIRECT_URI = 'http://localhost:1455/auth/callback';
+const FLOWPILOT_LOCAL_ENV_ENDPOINT = 'http://127.0.0.1:17374/env';
 const SUB2API_DEFAULT_CONCURRENCY = 10;
 const SUB2API_DEFAULT_PRIORITY = 1;
 const SUB2API_DEFAULT_RATE_MULTIPLIER = 1;
@@ -50,8 +51,35 @@ function getSub2ApiOrigin(payload = {}) {
   }
 }
 
-function normalizeRedirectUri() {
-  const input = SUB2API_DEFAULT_REDIRECT_URI;
+async function getFlowPilotPublicEnv() {
+  try {
+    const response = await fetch(FLOWPILOT_LOCAL_ENV_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: '{}',
+    });
+    const payload = await response.json().catch(() => ({}));
+    return response.ok && payload?.ok !== false && payload?.env && typeof payload.env === 'object'
+      ? payload.env
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function resolveSub2ApiRedirectUri(payload = {}) {
+  const publicEnv = await getFlowPilotPublicEnv();
+  return String(
+    payload.sub2apiRedirectUri
+    || publicEnv.FLOWPILOT_SUB2API_REDIRECT_URI
+    || SUB2API_DEFAULT_REDIRECT_URI
+  ).trim();
+}
+
+function normalizeRedirectUri(input) {
   const withProtocol = /^https?:\/\//i.test(input) ? input : `http://${input}`;
   const parsed = new URL(withProtocol);
   if (!parsed.pathname || parsed.pathname === '/') {
@@ -519,7 +547,7 @@ function openAccountsPageSoon(origin) {
 async function step1_generateOpenAiAuthUrl(payload = {}, options = {}) {
   const { report = true } = options;
   const logStep = Number.isInteger(payload?.logStep) ? payload.logStep : 1;
-  const redirectUri = normalizeRedirectUri();
+  const redirectUri = normalizeRedirectUri(await resolveSub2ApiRedirectUri(payload));
   const groupNames = normalizeSub2ApiGroupNames(payload.sub2apiGroupName || SUB2API_DEFAULT_GROUP_NAME);
   const groupName = groupNames[0] || SUB2API_DEFAULT_GROUP_NAME;
 

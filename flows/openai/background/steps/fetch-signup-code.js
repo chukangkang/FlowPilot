@@ -26,6 +26,7 @@
       sendToContentScriptResilient,
       isRetryableContentScriptTransportError = () => false,
       shouldUseCustomRegistrationEmail,
+      shouldUseCustomMailProviderManualCode = shouldUseCustomRegistrationEmail,
       STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
       throwIfStopped,
       waitForTabStableComplete = null,
@@ -93,7 +94,7 @@
     }
 
     async function executeSignupEmailVerificationStep(state, stepStartedAt, verificationSessionKey) {
-      if (shouldUseCustomRegistrationEmail(state)) {
+      if (shouldUseCustomMailProviderManualCode(state)) {
         await confirmCustomVerificationStepBypass(4);
         return;
       }

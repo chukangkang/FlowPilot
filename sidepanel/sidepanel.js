@@ -250,6 +250,10 @@ const selectMailProvider = document.getElementById('select-mail-provider');
 const btnMailLogin = document.getElementById('btn-mail-login');
 const rowCustomMailProviderPool = document.getElementById('row-custom-mail-provider-pool');
 const inputCustomMailProviderPool = document.getElementById('input-custom-mail-provider-pool');
+const rowCustomMailProviderHelper = document.getElementById('row-custom-mail-provider-helper');
+const inputCustomMailProviderHelperEnabled = document.getElementById('input-custom-mail-provider-helper-enabled');
+const rowCustomMailProviderHelperUrl = document.getElementById('row-custom-mail-provider-helper-url');
+const inputCustomMailProviderHelperUrl = document.getElementById('input-custom-mail-provider-helper-url');
 const rowMail2925Mode = document.getElementById('row-mail-2925-mode');
 const rowMail2925PoolSettings = document.getElementById('row-mail2925-pool-settings');
 const mail2925ModeButtons = Array.from(document.querySelectorAll('[data-mail2925-mode]'));
@@ -3439,6 +3443,26 @@ function normalizeGpcLocalSmsHelperBaseUrlValue(value = '') {
   }
 }
 
+function normalizeCustomMailProviderHelperBaseUrlValue(value = '') {
+  const fallback = 'http://127.0.0.1:17374';
+  const rawValue = String(value || fallback).trim();
+  try {
+    const parsed = new URL(rawValue);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return fallback;
+    }
+    const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+    if (['/code', '/messages', '/health'].includes(endpointPath)) {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
 function hasOwnStateValue(source, key) {
   return Object.prototype.hasOwnProperty.call(source, key);
 }
@@ -4093,6 +4117,28 @@ function collectSettingsPayload() {
   const normalizeYydsBaseUrlValue = typeof normalizeYydsMailBaseUrl === 'function'
     ? normalizeYydsMailBaseUrl
     : ((value) => String(value || '').trim() || 'https://maliapi.215.im/v1');
+  const normalizeCustomMailProviderHelperUrl = (value = '') => {
+    if (typeof normalizeCustomMailProviderHelperBaseUrlValue === 'function') {
+      return normalizeCustomMailProviderHelperBaseUrlValue(value);
+    }
+    const fallback = 'http://127.0.0.1:17374';
+    const rawValue = String(value || fallback).trim();
+    try {
+      const parsed = new URL(rawValue);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return fallback;
+      }
+      const endpointPath = parsed.pathname.replace(/\/+$/g, '') || '/';
+      if (['/code', '/messages', '/health'].includes(endpointPath)) {
+        parsed.pathname = '';
+        parsed.search = '';
+        parsed.hash = '';
+      }
+      return parsed.toString().replace(/\/$/, '');
+    } catch {
+      return fallback;
+    }
+  };
   const { domains, activeDomain } = getCloudflareDomainsFromState();
   const selectedCloudflareDomain = normalizeCloudflareDomainValue(
     !cloudflareDomainEditMode ? selectCfDomain.value : activeDomain
@@ -4945,6 +4991,10 @@ function collectSettingsPayload() {
       customPassword: inputPassword.value,
     }),
     mailProvider: selectMailProvider.value,
+    customMailProviderHelperEnabled: Boolean(typeof inputCustomMailProviderHelperEnabled !== 'undefined' && inputCustomMailProviderHelperEnabled?.checked),
+    customMailProviderHelperBaseUrl: normalizeCustomMailProviderHelperUrl(
+      typeof inputCustomMailProviderHelperUrl !== 'undefined' ? inputCustomMailProviderHelperUrl?.value : '',
+    ),
     mail2925Mode: getSelectedMail2925Mode(),
     mail2925UseAccountPool,
     currentMail2925AccountId: String(latestState?.currentMail2925AccountId || '').trim(),
@@ -11229,6 +11279,12 @@ function applySettingsState(state) {
   if (inputCustomMailProviderPool) {
     inputCustomMailProviderPool.value = normalizeCustomEmailPoolEntries(state?.customMailProviderPool).join('\n');
   }
+  if (typeof inputCustomMailProviderHelperEnabled !== 'undefined' && inputCustomMailProviderHelperEnabled) {
+    inputCustomMailProviderHelperEnabled.checked = Boolean(state?.customMailProviderHelperEnabled);
+  }
+  if (typeof inputCustomMailProviderHelperUrl !== 'undefined' && inputCustomMailProviderHelperUrl) {
+    inputCustomMailProviderHelperUrl.value = normalizeCustomMailProviderHelperBaseUrlValue(state?.customMailProviderHelperBaseUrl);
+  }
   const restoredCustomEmailPoolEntries = typeof restoreCustomEmailPoolEntriesFromState === 'function'
     ? restoreCustomEmailPoolEntriesFromState(state)
     : normalizeCustomEmailPoolEntries(state?.customEmailPool);
@@ -12781,6 +12837,15 @@ function updateMailProviderUI() {
   if (typeof rowCustomMailProviderPool !== 'undefined' && rowCustomMailProviderPool) {
     rowCustomMailProviderPool.style.display = useCustomEmail ? '' : 'none';
   }
+  if (typeof rowCustomMailProviderHelper !== 'undefined' && rowCustomMailProviderHelper) {
+    rowCustomMailProviderHelper.style.display = useCustomEmail ? '' : 'none';
+  }
+  if (typeof rowCustomMailProviderHelperUrl !== 'undefined' && rowCustomMailProviderHelperUrl) {
+    rowCustomMailProviderHelperUrl.style.display = useCustomEmail
+      && Boolean(typeof inputCustomMailProviderHelperEnabled !== 'undefined' && inputCustomMailProviderHelperEnabled?.checked)
+      ? ''
+      : 'none';
+  }
   rowEmailPrefix.style.display = useGeneratedAlias && !useMail2925AccountPool ? '' : 'none';
   const hotmailServiceMode = getSelectedHotmailServiceMode();
   rowInbucketHost.style.display = useInbucket ? '' : 'none';
@@ -12955,7 +13020,9 @@ function updateMailProviderUI() {
       : '请先在邮箱池里每行填写一个邮箱，自动轮数会跟随数量';
   }
   if (autoHintText && useCustomEmail && useCustomMailProviderPool) {
-    autoHintText.textContent = `当前自定义号池共 ${getCustomMailProviderPoolSize()} 个邮箱，自动轮数会跟随数量；第 4/8 步仍需手动输入验证码`;
+    autoHintText.textContent = Boolean(typeof inputCustomMailProviderHelperEnabled !== 'undefined' && inputCustomMailProviderHelperEnabled?.checked)
+      ? `当前自定义号池共 ${getCustomMailProviderPoolSize()} 个邮箱，自动轮数会跟随数量；第 4/8 步将通过本地 IMAP 助手自动获取验证码`
+      : `当前自定义号池共 ${getCustomMailProviderPoolSize()} 个邮箱，自动轮数会跟随数量；第 4/8 步仍需手动输入验证码`;
   }
   if (autoHintText && useGmail && useGeneratedAlias) {
     autoHintText.textContent = '请先填写 Gmail 原邮箱，步骤 3 会自动生成 Gmail +tag 地址';

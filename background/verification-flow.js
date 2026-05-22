@@ -29,6 +29,7 @@
       MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
       pollCloudflareTempEmailVerificationCode,
       pollCloudMailVerificationCode,
+      pollCustomMailProviderVerificationCode,
       pollHotmailVerificationCode,
       pollLuckmailVerificationCode,
       pollYydsMailVerificationCode,
@@ -993,6 +994,13 @@
           ...cleanPollOverrides,
         }, cleanPollOverrides, `轮询${getVerificationCodeLabel(step)}验证码邮箱`);
         return pollYydsMailVerificationCode(step, state, timedPoll.payload);
+      }
+      if (mail.provider === 'custom' && typeof pollCustomMailProviderVerificationCode === 'function') {
+        const timedPoll = await applyMailPollingTimeBudget(step, {
+          ...getVerificationPollPayload(step, state),
+          ...cleanPollOverrides,
+        }, cleanPollOverrides, `轮询${getVerificationCodeLabel(step)}验证码邮箱`);
+        return pollCustomMailProviderVerificationCode(step, state, timedPoll.payload);
       }
 
       if (Number(pollOverrides.resendIntervalMs) > 0) {

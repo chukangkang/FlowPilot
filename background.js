@@ -1361,6 +1361,8 @@ const PERSISTED_SETTING_DEFAULTS = {
   phoneCodePollIntervalSeconds: DEFAULT_PHONE_CODE_POLL_INTERVAL_SECONDS,
   phoneCodePollMaxRounds: DEFAULT_PHONE_CODE_POLL_ROUNDS,
   mailProvider: '163',
+  customMailProviderHelperEnabled: false,
+  customMailProviderHelperBaseUrl: 'http://127.0.0.1:17374',
   mail2925Mode: DEFAULT_MAIL_2925_MODE,
   mail2925UseAccountPool: false,
   emailGenerator: 'duck',
@@ -2891,6 +2893,32 @@ function normalizeHotmailLocalBaseUrl(rawValue = '') {
   }
 }
 
+function normalizeCustomMailProviderHelperBaseUrl(rawValue = '') {
+  const fallback = 'http://127.0.0.1:17374';
+  const value = String(rawValue || '').trim();
+  if (!value) return fallback;
+
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return fallback;
+    }
+    if (['/code', '/messages', '/health'].includes(parsed.pathname.replace(/\/+$/, '') || '/')) {
+      parsed.pathname = '';
+      parsed.search = '';
+      parsed.hash = '';
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+function buildCustomMailProviderHelperEndpoint(baseUrl, path) {
+  const normalizedBaseUrl = normalizeCustomMailProviderHelperBaseUrl(baseUrl);
+  return new URL(path, `${normalizedBaseUrl}/`).toString();
+}
+
 function normalizeAccountRunHistoryHelperBaseUrl(rawValue = '') {
   const value = String(rawValue || '').trim();
   if (!value) return DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL;
@@ -3391,6 +3419,10 @@ function normalizePersistentSettingValue(key, value) {
       return normalizePhoneCodePollMaxRounds(value, DEFAULT_PHONE_CODE_POLL_ROUNDS);
     case 'mailProvider':
       return normalizeMailProvider(value);
+    case 'customMailProviderHelperEnabled':
+      return Boolean(value);
+    case 'customMailProviderHelperBaseUrl':
+      return normalizeCustomMailProviderHelperBaseUrl(value);
     case 'mail2925Mode':
       return normalizeMail2925Mode(value);
     case 'mail2925UseAccountPool':
@@ -5037,6 +5069,10 @@ function isCustomMailProvider(stateOrProvider) {
   return provider === 'custom';
 }
 
+function isCustomMailProviderAutoCodeEnabled(state = {}) {
+  return isCustomMailProvider(state) && Boolean(state?.customMailProviderHelperEnabled);
+}
+
 function getMail2925Mode(stateOrMode) {
   if (typeof stateOrMode === 'string') {
     return normalizeMail2925Mode(stateOrMode);
@@ -5560,6 +5596,116 @@ async function pollHotmailVerificationCodeViaLocalHelper(step, account, pollPayl
   throw lastError || new Error(`步骤 ${step}：本地助手未返回新的匹配验证码。`);
 }
 
+async function requestCustomMailProviderLocalCode(state = {}, pollPayload = {}) {
+  if (!isCustomMailProviderAutoCodeEnabled(state)) {
+    throw new Error('自定义邮箱本地 IMAP 助手未启用。');
+  }
+  const targetEmail = String(pollPayload.targetEmail || state.step8VerificationTargetEmail || state.email || '').trim().toLowerCase();
+  if (!targetEmail) {
+    throw new Error('自定义邮箱轮询前缺少目标邮箱地址。');
+  }
+
+  const baseUrl = normalizeCustomMailProviderHelperBaseUrl(state.customMailProviderHelperBaseUrl);
+  const requestTimeoutMs = HOTMAIL_LOCAL_HELPER_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error('timeout')), requestTimeoutMs);
+
+  let response;
+  try {
+    response = await fetch(buildCustomMailProviderHelperEndpoint(baseUrl, '/code'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        targetEmail,
+        top: Number(pollPayload.top || 20) || 20,
+        senderFilters: pollPayload.senderFilters || [],
+        subjectFilters: pollPayload.subjectFilters || [],
+        requiredKeywords: pollPayload.requiredKeywords || [],
+        codePatterns: pollPayload.codePatterns || [],
+        excludeCodes: pollPayload.excludeCodes || [],
+        filterAfterTimestamp: Number(pollPayload.filterAfterTimestamp || 0) || 0,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`自定义邮箱本地 IMAP 助手请求超时（>${Math.round(requestTimeoutMs / 1000)} 秒）`);
+    }
+    throw new Error(`自定义邮箱本地 IMAP 助手请求失败：${err.message}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw: text };
+  }
+
+  if (!response.ok || payload?.ok === false) {
+    const errorText = payload?.error || payload?.message || text || `HTTP ${response.status}`;
+    throw new Error(`自定义邮箱本地 IMAP 助手返回失败：${errorText}`);
+  }
+
+  const normalizedMessage = payload?.message
+    ? {
+      ...normalizeHotmailMailApiMessages([payload.message])[0],
+      mailbox: payload?.message?.mailbox || 'INBOX',
+      receivedTimestamp: Number(payload?.message?.receivedTimestamp || 0) || 0,
+    }
+    : null;
+  return {
+    code: String(payload?.code || ''),
+    message: normalizedMessage,
+    usedTimeFallback: Boolean(payload?.usedTimeFallback),
+    selectionSource: String(payload?.selectionSource || ''),
+  };
+}
+
+async function pollCustomMailProviderVerificationCode(step, state, pollPayload = {}) {
+  const maxAttempts = Number(pollPayload.maxAttempts) || 5;
+  const intervalMs = Number(pollPayload.intervalMs) || 3000;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    throwIfStopped();
+    try {
+      await addLog(`步骤 ${step}：正在通过自定义邮箱本地 IMAP 助手轮询验证码（${attempt}/${maxAttempts}）...`, 'info');
+      const fetchResult = await requestCustomMailProviderLocalCode(state, pollPayload);
+
+      if (fetchResult.code) {
+        if (fetchResult.usedTimeFallback) {
+          await addLog(`步骤 ${step}：自定义邮箱助手使用时间回退后命中验证码。`, 'warn');
+        }
+        await addLog(`步骤 ${step}：已通过自定义邮箱助手找到验证码：${fetchResult.code}`, 'ok');
+        return {
+          ok: true,
+          code: fetchResult.code,
+          emailTimestamp: fetchResult.message?.receivedTimestamp || Date.now(),
+          mailId: fetchResult.message?.id || '',
+        };
+      }
+
+      lastError = new Error(`步骤 ${step}：自定义邮箱助手暂未返回匹配验证码（${attempt}/${maxAttempts}）。`);
+      await addLog(lastError.message, attempt === maxAttempts ? 'warn' : 'info');
+    } catch (err) {
+      lastError = err;
+      await addLog(`步骤 ${step}：自定义邮箱助手轮询失败：${err.message}`, 'warn');
+    }
+
+    if (attempt < maxAttempts) {
+      await sleepWithStop(intervalMs);
+    }
+  }
+
+  throw lastError || new Error(`步骤 ${step}：自定义邮箱助手未返回新的匹配验证码。`);
+}
+
 async function fetchHotmailMailboxMessages(account, mailboxes = HOTMAIL_MAILBOXES) {
   const serviceSettings = getHotmailServiceSettings(await getState());
   if (serviceSettings.mode === HOTMAIL_SERVICE_MODE_LOCAL) {
@@ -5859,7 +6005,7 @@ function isGeneratedAliasProvider(stateOrProvider, mail2925Mode = undefined) {
 }
 
 function shouldUseCustomRegistrationEmail(state = {}) {
-  return isCustomMailProvider(state)
+  return (isCustomMailProvider(state) && !isCustomMailProviderAutoCodeEnabled(state))
     || (!isHotmailProvider(state)
       && !isGeneratedAliasProvider(state)
       && normalizeEmailGenerator(state.emailGenerator) === 'custom');
@@ -6028,7 +6174,7 @@ function isGeneratedAliasProvider(stateOrProvider, mail2925Mode = undefined) {
 }
 
 function shouldUseCustomRegistrationEmail(state = {}) {
-  return isCustomMailProvider(state)
+  return (isCustomMailProvider(state) && !isCustomMailProviderAutoCodeEnabled(state))
     || (!isHotmailProvider(state)
       && !isGeneratedAliasProvider(state)
       && normalizeEmailGenerator(state.emailGenerator) === 'custom');
@@ -13462,6 +13608,7 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   MAIL_2925_VERIFICATION_MAX_ATTEMPTS,
   pollCloudflareTempEmailVerificationCode,
   pollCloudMailVerificationCode,
+  pollCustomMailProviderVerificationCode,
   pollHotmailVerificationCode,
   pollLuckmailVerificationCode,
   pollYydsMailVerificationCode,
@@ -13599,6 +13746,7 @@ const step4Executor = self.MultiPageBackgroundStep4?.createStep4Executor({
   sendToContentScriptResilient,
   isRetryableContentScriptTransportError,
   shouldUseCustomRegistrationEmail,
+  shouldUseCustomMailProviderManualCode: (state) => isCustomMailProvider(state) && !isCustomMailProviderAutoCodeEnabled(state),
   STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
   throwIfStopped,
   waitForTabStableComplete,
@@ -13669,6 +13817,7 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   sendToContentScriptResilient,
   setState,
   shouldUseCustomRegistrationEmail,
+  shouldUseCustomMailProviderManualCode: (state) => isCustomMailProvider(state) && !isCustomMailProviderAutoCodeEnabled(state),
   sleepWithStop,
   STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
   STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS,

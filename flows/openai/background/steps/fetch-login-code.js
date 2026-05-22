@@ -32,6 +32,7 @@
       phoneVerificationHelpers = null,
       setState,
       shouldUseCustomRegistrationEmail,
+      shouldUseCustomMailProviderManualCode = shouldUseCustomRegistrationEmail,
       sleepWithStop,
       STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS,
       STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS,
@@ -594,7 +595,7 @@
         await addLog(`步骤 ${visibleStep}：已固定当前验证码页显示邮箱 ${displayedVerificationEmail} 作为后续匹配目标。`, 'info');
       }
 
-      if (shouldUseCustomRegistrationEmail(preparedState)) {
+      if (shouldUseCustomMailProviderManualCode(preparedState)) {
         await confirmCustomVerificationStepBypass(8, {
           completionStep: visibleStep,
           promptStep: visibleStep,

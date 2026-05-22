@@ -126,6 +126,8 @@
         stepExecutionRangeByFlow: state.stepExecutionRangeByFlow,
         signupMethod: state.signupMethod,
         mailProvider: state.mailProvider,
+        customMailProviderHelperEnabled: state.customMailProviderHelperEnabled,
+        customMailProviderHelperBaseUrl: state.customMailProviderHelperBaseUrl,
         emailGenerator: state.emailGenerator,
         gmailBaseEmail: state.gmailBaseEmail,
         mail2925BaseEmail: state.mail2925BaseEmail,
