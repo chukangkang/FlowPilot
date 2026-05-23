@@ -13153,39 +13153,51 @@ async function runAutoSequenceFromNodeGraph(startNodeId, context = {}) {
   }
 
   if (await shouldRunNamedNode('open-chatgpt')) {
-    try {
-      await executeNodeAndWaitWithAutoRunIdleLogWatchdog('open-chatgpt', getAutoRunNodeDelayMs('open-chatgpt'));
-    } catch (err) {
-      attachFailedNode(err, 'open-chatgpt', await getState());
-      if (isStopError(err)) {
+    const latestState = await getState();
+    const openChatgptStatus = getNodeStatusForNode(latestState, 'open-chatgpt');
+    if (isStepDoneStatus(openChatgptStatus)) {
+      await addLog(`自动运行：节点 open-chatgpt 当前状态为 ${openChatgptStatus}，将直接继续后续流程。`, 'info');
+    } else {
+      try {
+        await executeNodeAndWaitWithAutoRunIdleLogWatchdog('open-chatgpt', getAutoRunNodeDelayMs('open-chatgpt'));
+      } catch (err) {
+        attachFailedNode(err, 'open-chatgpt', await getState());
+        if (isStopError(err)) {
+          throw err;
+        }
+        if (await restartCurrentNodeAfterIdle('open-chatgpt', err)) {
+          continue;
+        }
         throw err;
       }
-      if (await restartCurrentNodeAfterIdle('open-chatgpt', err)) {
-        continue;
-      }
-      throw err;
     }
   }
 
   if (await shouldRunNamedNode('submit-signup-email')) {
-    try {
-      await runAutoNodeActionWithIdleLogWatchdog('submit-signup-email', async () => {
-        if (resolvedSignupMethod === SIGNUP_METHOD_PHONE) {
-          await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：本轮注册方式为手机号注册，将跳过邮箱预获取 ===`, 'info');
-        } else {
-          await ensureAutoEmailReady(targetRun, totalRuns, attemptRuns);
+    const latestState = await getState();
+    const submitSignupEmailStatus = getNodeStatusForNode(latestState, 'submit-signup-email');
+    if (isStepDoneStatus(submitSignupEmailStatus)) {
+      await addLog(`自动运行：节点 submit-signup-email 当前状态为 ${submitSignupEmailStatus}，将直接继续后续流程。`, 'info');
+    } else {
+      try {
+        await runAutoNodeActionWithIdleLogWatchdog('submit-signup-email', async () => {
+          if (resolvedSignupMethod === SIGNUP_METHOD_PHONE) {
+            await addLog(`=== 目标 ${targetRun}/${totalRuns} 轮：本轮注册方式为手机号注册，将跳过邮箱预获取 ===`, 'info');
+          } else {
+            await ensureAutoEmailReady(targetRun, totalRuns, attemptRuns);
+          }
+          await executeNodeAndWait('submit-signup-email', getAutoRunNodeDelayMs('submit-signup-email'));
+        });
+      } catch (err) {
+        attachFailedNode(err, 'submit-signup-email', await getState());
+        if (isStopError(err)) {
+          throw err;
         }
-        await executeNodeAndWait('submit-signup-email', getAutoRunNodeDelayMs('submit-signup-email'));
-      });
-    } catch (err) {
-      attachFailedNode(err, 'submit-signup-email', await getState());
-      if (isStopError(err)) {
+        if (await restartCurrentNodeAfterIdle('submit-signup-email', err)) {
+          continue;
+        }
         throw err;
       }
-      if (await restartCurrentNodeAfterIdle('submit-signup-email', err)) {
-        continue;
-      }
-      throw err;
     }
   }
 
