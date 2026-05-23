@@ -1109,7 +1109,7 @@ return {
   assert.equal(api.isCompletion('https://chatgpt.com/add-phone'), false);
 });
 
-test('step 5 navigation reporter does not complete on beforeunload alone', () => {
+test('step 5 navigation reporter completes once on beforeunload', () => {
   const api = new Function(`
 const events = [];
 const listeners = new Map();
@@ -1148,21 +1148,30 @@ ${extractFunction('installStep5NavigationCompletionReporter')}
 return {
   run() {
     let completionCount = 0;
-    const cleanup = installStep5NavigationCompletionReporter(() => {
+    const completionEvents = [];
+    const cleanup = installStep5NavigationCompletionReporter((payload) => {
       completionCount += 1;
-      events.push({ type: 'complete' });
+      completionEvents.push(payload || {});
+      events.push({ type: 'complete', payload });
     });
     const beforeUnload = listeners.get('beforeunload');
     if (beforeUnload) {
       beforeUnload({ type: 'beforeunload' });
     }
     cleanup();
-    return { completionCount, events };
+    return { completionCount, completionEvents, events };
   },
 };
 `)();
 
   const result = api.run();
-  assert.equal(result.completionCount, 0);
+  assert.equal(result.completionCount, 1);
+  assert.deepStrictEqual(result.completionEvents[0], {
+    navigationStarted: true,
+    navigationEventType: 'beforeunload',
+    outcome: {
+      url: 'https://auth.openai.com/about-you',
+    },
+  });
   assert.equal(result.events.some((entry) => entry.type === 'log' && /检测到页面开始导航/.test(entry.message)), true);
 });

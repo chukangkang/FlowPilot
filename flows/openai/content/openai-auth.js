@@ -6841,6 +6841,13 @@ function installStep5NavigationCompletionReporter(completeOnce) {
     debugLog(`检测到页面开始导航（event=${eventType}）。`, {
       level: 'warn',
     });
+    completeOnce({
+      navigationStarted: true,
+      navigationEventType: eventType,
+      outcome: {
+        url: location.href,
+      },
+    });
   };
 
   window.addEventListener('pagehide', onNavigationStarted, { once: true });
