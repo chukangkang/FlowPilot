@@ -58,6 +58,7 @@
 
     async function openSignupEntryTab(step = 1) {
       const tabId = await reuseOrCreateTab('openai-auth', SIGNUP_ENTRY_URL, {
+        forceNew: Number(step) === 1,
         inject: OPENAI_AUTH_INJECT_FILES,
         injectSource: 'openai-auth',
       });

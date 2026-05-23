@@ -844,14 +844,14 @@
           await syncStepAccountIdentityFromPayload(payload);
           if (payload.skipRegistrationFlow) {
             const latestState = await getState();
-            for (const skippedStep of [3, 4, 5]) {
+            for (const skippedStep of [3, 4, 5, 6]) {
               const status = getNodeStatusByStep(skippedStep, latestState);
               if (status === 'running' || status === 'completed' || status === 'manual_completed') {
                 continue;
               }
               await setNodeStatusByStep(skippedStep, 'skipped', latestState);
             }
-            await addLog('步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5，流程将直接进入步骤 6。', 'warn');
+            await addLog('步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5/6，流程将直接进入 OAuth 登录。', 'warn');
             break;
           }
           if (payload.skippedPasswordStep) {
@@ -875,6 +875,11 @@
             if (step5Status !== 'running' && step5Status !== 'completed' && step5Status !== 'manual_completed') {
               await setNodeStatusByStep(5, 'skipped', latestState);
               await addLog('步骤 3：页面已直接进入已登录态，已自动跳过步骤 5。', 'warn');
+            }
+            const step6Status = getNodeStatusByStep(6, latestState);
+            if (step6Status !== 'running' && step6Status !== 'completed' && step6Status !== 'manual_completed') {
+              await setNodeStatusByStep(6, 'skipped', latestState);
+              await addLog('步骤 3：页面已直接进入已登录态，已自动跳过步骤 6。', 'warn');
             }
           }
           if (payload.loginVerificationRequestedAt) {
@@ -901,6 +906,13 @@
                 await addLog('步骤 4：当前验证码页已内嵌完成注册资料提交，已自动跳过步骤 5。', 'warn');
               } else {
                 await addLog('步骤 4：检测到账号已直接进入已登录态，已自动跳过步骤 5。', 'warn');
+              }
+            }
+            if (payload.skipProfileStepReason !== 'combined_verification_profile') {
+              const step6Status = getNodeStatusByStep(6, latestState);
+              if (step6Status !== 'running' && step6Status !== 'completed' && step6Status !== 'manual_completed') {
+                await setNodeStatusByStep(6, 'skipped', latestState);
+                await addLog('步骤 4：检测到账号已直接进入已登录态，已自动跳过步骤 6。', 'warn');
               }
             }
           }

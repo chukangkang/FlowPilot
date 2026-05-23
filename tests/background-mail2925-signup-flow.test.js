@@ -6,6 +6,39 @@ const signupFlowSource = fs.readFileSync('background/signup-flow-helpers.js', 'u
 const signupFlowGlobalScope = {};
 const signupFlowApi = new Function('self', `${signupFlowSource}; return self.MultiPageSignupFlowHelpers;`)(signupFlowGlobalScope);
 
+test('signup flow helper opens a forced fresh auth tab for step 1 only', async () => {
+  const calls = [];
+  const helpers = signupFlowApi.createSignupFlowHelpers({
+    buildGeneratedAliasEmail: () => '',
+    chrome: { tabs: { get: async () => ({ id: 1, url: 'https://chatgpt.com/' }) } },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureHotmailAccountForFlow: async () => ({}),
+    ensureMail2925AccountForFlow: async () => ({}),
+    ensureLuckmailPurchaseForFlow: async () => ({}),
+    isGeneratedAliasProvider: () => false,
+    isHotmailProvider: () => false,
+    isLuckmailProvider: () => false,
+    isSignupEmailVerificationPageUrl: () => false,
+    isSignupPasswordPageUrl: () => false,
+    reuseOrCreateTab: async (source, url, options) => {
+      calls.push({ source, url, options });
+      return calls.length;
+    },
+    sendToContentScriptResilient: async () => ({}),
+    setEmailState: async () => {},
+    SIGNUP_ENTRY_URL: 'https://chatgpt.com/',
+    OPENAI_AUTH_INJECT_FILES: ['content/utils.js'],
+    waitForTabStableComplete: async () => {},
+    waitForTabUrlMatch: async () => null,
+  });
+
+  await helpers.openSignupEntryTab(1);
+  await helpers.openSignupEntryTab(2);
+
+  assert.equal(calls[0].options.forceNew, true);
+  assert.equal(calls[1].options.forceNew, false);
+});
+
 test('signup flow helper allocates mail2925 account before generating alias email', async () => {
   const calls = {
     ensureMail2925: [],

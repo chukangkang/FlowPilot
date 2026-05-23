@@ -345,9 +345,9 @@ test('message router does not overwrite a completed step 3 when step 2 is replay
   assert.deepStrictEqual(events.stepStatuses, []);
 });
 
-test('message router skips steps 3/4/5 when step 2 detects already logged-in session', async () => {
+test('message router skips steps 3/4/5/6 when step 2 detects already logged-in session', async () => {
   const { router, events } = createRouter({
-    state: { stepStatuses: { 3: 'pending', 4: 'completed', 5: 'pending' } },
+    state: { stepStatuses: { 3: 'pending', 4: 'completed', 5: 'pending', 6: 'pending' } },
   });
 
   await router.handleStepData(2, {
@@ -360,13 +360,30 @@ test('message router skips steps 3/4/5 when step 2 detects already logged-in ses
   assert.deepStrictEqual(events.stepStatuses, [
     { step: 3, status: 'skipped' },
     { step: 5, status: 'skipped' },
+    { step: 6, status: 'skipped' },
   ]);
-  assert.equal(events.logs[0]?.message, '步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5，流程将直接进入步骤 6。');
+  assert.equal(events.logs[0]?.message, '步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5/6，流程将直接进入 OAuth 登录。');
+});
+
+test('message router skips step 6 when step 3 reaches an already logged-in session', async () => {
+  const { router, events } = createRouter({
+    state: { stepStatuses: { 5: 'pending', 6: 'pending' } },
+  });
+
+  await router.handleStepData(3, {
+    skipProfileStep: true,
+  });
+
+  assert.deepStrictEqual(events.stepStatuses, [
+    { step: 5, status: 'skipped' },
+    { step: 6, status: 'skipped' },
+  ]);
+  assert.equal(events.logs.some(({ message }) => /已自动跳过步骤 6/.test(message)), true);
 });
 
 test('message router skips step 5 when step 4 reports already logged-in transition', async () => {
   const { router, events } = createRouter({
-    state: { stepStatuses: { 5: 'pending' } },
+    state: { stepStatuses: { 5: 'pending', 6: 'pending' } },
   });
 
   await router.handleStepData(4, {
@@ -374,8 +391,26 @@ test('message router skips step 5 when step 4 reports already logged-in transiti
     skipProfileStep: true,
   });
 
-  assert.deepStrictEqual(events.stepStatuses, [{ step: 5, status: 'skipped' }]);
+  assert.deepStrictEqual(events.stepStatuses, [
+    { step: 5, status: 'skipped' },
+    { step: 6, status: 'skipped' },
+  ]);
   assert.equal(events.logs[0]?.message, '步骤 4：检测到账号已直接进入已登录态，已自动跳过步骤 5。');
+});
+
+test('message router keeps step 6 when step 4 completed an embedded profile submit', async () => {
+  const { router, events } = createRouter({
+    state: { stepStatuses: { 5: 'pending', 6: 'pending' } },
+  });
+
+  await router.handleStepData(4, {
+    emailTimestamp: 123,
+    skipProfileStep: true,
+    skipProfileStepReason: 'combined_verification_profile',
+  });
+
+  assert.deepStrictEqual(events.stepStatuses, [{ step: 5, status: 'skipped' }]);
+  assert.equal(events.logs[0]?.message, '步骤 4：当前验证码页已内嵌完成注册资料提交，已自动跳过步骤 5。');
 });
 
 test('message router skips login-code step when oauth login lands on consent page', async () => {
